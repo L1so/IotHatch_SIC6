@@ -1,0 +1,97 @@
+from machine import Pin, I2C
+import time
+import ssd1306
+import dht
+import network
+import urequests 
+
+# OLED DISPLAY
+SCREEN_WIDTH = 128
+SCREEN_HEIGHT = 64
+
+i2c = I2C(scl=Pin(22), sda=Pin(21))
+oled = ssd1306.SSD1306_I2C(SCREEN_WIDTH, SCREEN_HEIGHT, i2c)
+
+# Sensor DHT11
+dht_sensor = dht.DHT11(Pin(4))
+
+# Sensor ultrasonik
+TRIGPIN = Pin(14, Pin.OUT)
+ECHOPIN = Pin(13, Pin.IN)
+
+# WiFi
+SSID = 'rpv'
+PASSWORD = 'japat266'
+
+# Ubidots
+UBIDOTS_TOKEN = 'disembunyikan'
+DEVICE_LABEL = 'iothatch-sic6'
+VARIABLE_TEMP_LABEL = 'suhu'
+VARIABLE_DIST_LABEL = 'jarak'
+
+def connect_to_wifi():
+    wlan = network.WLAN(network.STA_IF)
+    wlan.active(True)
+    wlan.connect(SSID, PASSWORD)
+
+    print("Connecting to WiFi...")
+    while not wlan.isconnected():
+        time.sleep(1)
+    print("Connected to WiFi")
+
+def measure_distance():
+    TRIGPIN.off()
+    time.sleep_us(2)
+    TRIGPIN.on()
+    time.sleep_us(10)
+    TRIGPIN.off()
+
+    pulse_start = time.ticks_us()
+    while ECHOPIN.value() == 0:
+        pulse_start = time.ticks_us()
+
+    pulse_end = time.ticks_us()
+    while ECHOPIN.value() == 1:
+        pulse_end = time.ticks_us()
+
+    pulse_duration = time.ticks_diff(pulse_end, pulse_start)
+    distance = pulse_duration * 0.034 / 2
+    return round(distance, 2) 
+
+# Kirim data ke ubidots
+def send_to_ubidots(temperature, distance):
+    url = f'https://industrial.api.ubidots.com/api/v1.6/devices/{DEVICE_LABEL}/'
+    headers = {
+        'X-Auth-Token': UBIDOTS_TOKEN,
+        'Content-Type': 'application/json'
+    }
+    payload = {
+        VARIABLE_TEMP_LABEL: temperature,
+        VARIABLE_DIST_LABEL: distance
+    }
+    response = urequests.post(url, json=payload, headers=headers)
+    print("Data sent to Ubidots:", response.text)
+    response.close()
+
+def main():
+    connect_to_wifi()
+    print("System ready!")
+
+    while True:
+        dht_sensor.measure()
+        temperature = dht_sensor.temperature()
+        
+        distance = measure_distance()
+
+        oled.fill(0)
+        oled.text("Temp: {:.2f} C".format(temperature), 0, 0)
+        oled.text("Dist: {:.2f} cm".format(distance), 0, 30)
+        oled.show()
+
+        send_to_ubidots(temperature, distance)
+
+        time.sleep(5)
+
+if __name__ == "__main__":
+    main()
+
